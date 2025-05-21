@@ -46,8 +46,7 @@ app.use(bodyParser.json({ limit: '50mb' }));
 
 app.get('/', (req, res) => {
   res.render('index');
-});
-app.post('/merge-spread', async (req, res) => {
+});app.post('/merge-spread', async (req, res) => {
   try {
     const base64Data = req.body.pdfBase64;
     const buffer = Buffer.from(base64Data, 'base64');
@@ -55,7 +54,6 @@ app.post('/merge-spread', async (req, res) => {
     const originalPdf = await PDFDocument.load(buffer);
     const newPdf = await PDFDocument.create();
 
-    // === Constants ===
     const POINTS_PER_MM = 2.83465;
     const BLEED_MM = 5;
     const BLEED = BLEED_MM * POINTS_PER_MM;
@@ -68,60 +66,101 @@ app.post('/merge-spread', async (req, res) => {
     const FINAL_HEIGHT = IMG_HEIGHT + BLEED * 2;
     const MARGIN_X = BLEED;
     const MARGIN_Y = BLEED;
+    const EXTRA_GUTTER = 0;
 
     const pagePairs = [
-      [2, 'blank'],
       ['blank', 1],
-      [6, 3],
-      [4, 5],
+      [2, 15],
+      [14, 3],
+      [4, 13],
+      [12, 5],
+      [6, 11],
       [10, 7],
-      [8, 9],
-      [14, 11],
-      [12, 13],
-      ['blank', 15],
-      [16, 0]
+      [8, 9]
     ];
 
-    const uniquePages = [...new Set(pagePairs.flat().filter(p => p !== 'blank'))];
-    const copiedPages = await newPdf.copyPages(originalPdf, uniquePages);
+    const finalSpreadPages = [16, 0]; // last spread
+    const uniquePages = [...new Set([...pagePairs.flat(), ...finalSpreadPages].filter(p => p !== 'blank'))];
+
+    const pageCount = originalPdf.getPageCount();
+    console.log('Uploaded PDF page count:', pageCount);
+
+    // Ensure no invalid page numbers are requested
+    const validPages = uniquePages.filter(p => Number.isInteger(p) && p >= 0 && p < pageCount);
+    if (validPages.length !== uniquePages.length) {
+      console.error("❌ Some pages in pagePairs do not exist in uploaded PDF.");
+      return res.status(400).json({ error: 'One or more pages do not exist in the uploaded PDF. Please upload a full file.' });
+    }
+
+    const copiedPages = await newPdf.copyPages(originalPdf, validPages);
     const pageMap = {};
-    uniquePages.forEach((pageNum, index) => {
+    validPages.forEach((pageNum, index) => {
       pageMap[pageNum] = copiedPages[index];
     });
+
     const drawCutMarks = (page, width, height, bleed) => {
-  const drawLine = (x1, y1, x2, y2) => {
-    page.drawLine({
-      start: { x: x1, y: y1 },
-      end: { x: x2, y: y2 },
-      thickness: 1,
-      color: rgb(0, 0, 0),
-    });
-  };
-// === bottom left
-// Horizontal (flush against top trim line)
-drawLine(bleed - 10, bleed, bleed, bleed);  // horizontal line
-// Vertical (flush against left top corner)
-drawLine(bleed - 0, bleed - 10, bleed , bleed);  // vertical line
+      const drawLine = (x1, y1, x2, y2) => {
+        page.drawLine({
+          start: { x: x1, y: y1 },
+          end: { x: x2, y: y2 },
+          thickness: 1,
+          color: rgb(0, 0, 0),
+        });
+      };
 
-// === bottom right
-drawLine(width - bleed , bleed, width - bleed  + 10, bleed);  // horizontal line
-drawLine(width - bleed , bleed - 10, width - bleed , bleed);  // vertical line
+      // Bottom-Left
+      drawLine(bleed - 10, bleed, bleed, bleed);
+      drawLine(bleed, bleed - 10, bleed, bleed);
 
-  // === top left
-  // Horizontal (Y = height - bleed)
-  drawLine(bleed - 10, height - bleed-9, bleed+1, height - bleed-9);
-  // Vertical (X = bleed - 2)
-  drawLine(bleed , height - bleed-10, bleed , height - bleed );
+      const rightX = width - bleed;
 
-  // === top right
-  // Horizontal 
-  drawLine(width - bleed -2, height - bleed-9, width - bleed  +9, height - bleed-9);
-  // Vertical 
-  drawLine(width - bleed -1, height - bleed-9, width - bleed -1, height - bleed +1);
-};
+      // Bottom-Right
+      drawLine(rightX, bleed, rightX + 10, bleed);
+      drawLine(rightX, bleed - 10, rightX, bleed);
 
+      // Top-Left
+      drawLine(bleed - 10, height - bleed - 9, bleed + 1, height - bleed - 9);
+      drawLine(bleed, height - bleed - 10, bleed, height - bleed);
 
-    // === Generate spreads with bleed + marks ===
+      // Top-Right
+      drawLine(rightX, height - bleed - 9, rightX + 10, height - bleed - 9);
+      drawLine(rightX, height - bleed - 9, rightX, height - bleed + 1);
+
+      // Center Spine
+      drawLine(IMG_WIDTH + BLEED, height - bleed - 9, IMG_WIDTH + BLEED, height - bleed + 1);
+      drawLine(IMG_WIDTH + BLEED, bleed - 10, IMG_WIDTH + BLEED, bleed);
+    };
+
+    const drawCutMarksLastPage = (page, width, height, bleed) => {
+      const drawLine = (x1, y1, x2, y2) => {
+        page.drawLine({
+          start: { x: x1, y: y1 },
+          end: { x: x2, y: y2 },
+          thickness: 1,
+          color: rgb(0, 0, 0),
+        });
+      };
+
+      const rightX = width - 10;
+      const rightLength = 20;
+
+      // Bottom-Left
+      drawLine(bleed - 10, bleed, bleed, bleed);
+      drawLine(bleed, bleed - 10, bleed, bleed);
+
+      // Bottom-Right
+      drawLine(rightX + 10, bleed, rightX + 12, bleed);
+      drawLine(rightX + 10, bleed - rightLength, rightX + 10, bleed);
+
+      // Top-Left
+      drawLine(bleed - 10, height - bleed - 9, bleed + 1, height - bleed - 9);
+      drawLine(bleed, height - bleed - 10, bleed, height - bleed);
+
+      // Top-Right
+      drawLine(rightX + 10, height - bleed - 9, rightX + 10 + rightLength, height - bleed - 9);
+      drawLine(rightX, height - bleed - 9, rightX, height - bleed + 1);
+    };
+
     for (const [leftIdx, rightIdx] of pagePairs) {
       const page = newPdf.addPage([FINAL_WIDTH, FINAL_HEIGHT]);
 
@@ -148,28 +187,43 @@ drawLine(width - bleed , bleed - 10, width - bleed , bleed);  // vertical line
       drawCutMarks(page, FINAL_WIDTH, FINAL_HEIGHT, BLEED);
     }
 
-    // === Wrap each spread page inside a larger centered canvas ===
+    // Final spread [16, 0]
+    if (!pageMap[16] || !pageMap[0]) {
+      throw new Error('❌ Final pages 16 or 0 are missing. Cannot complete spread.');
+    }
+
+    const lastPage = newPdf.addPage([FINAL_WIDTH, FINAL_HEIGHT]);
+    const [page16] = await newPdf.embedPages([pageMap[16]]);
+    lastPage.drawPage(page16, { x: 5, y: 5, width: IMG_WIDTH, height: IMG_HEIGHT });
+
+    const [page0] = await newPdf.embedPages([pageMap[0]]);
+    lastPage.drawPage(page0, {
+      x: MARGIN_X + IMG_WIDTH + EXTRA_GUTTER,
+      y: 5,
+      width: IMG_WIDTH,
+      height: IMG_HEIGHT,
+    });
+
+    drawCutMarksLastPage(lastPage, FINAL_WIDTH, FINAL_HEIGHT, BLEED);
+
     const wrapperPdf = await PDFDocument.create();
     const finalPages = await wrapperPdf.copyPages(newPdf, newPdf.getPageIndices());
 
-    const WRAP_PADDING = 30; // extra space around entire spread
+    const WRAP_PADDING = 30;
     const WRAP_WIDTH = FINAL_WIDTH + WRAP_PADDING * 2;
     const WRAP_HEIGHT = FINAL_HEIGHT + WRAP_PADDING * 2;
 
     for (const page of finalPages) {
       const wrapperPage = wrapperPdf.addPage([WRAP_WIDTH, WRAP_HEIGHT]);
-
       const [embeddedPage] = await wrapperPdf.embedPages([page]);
-
       wrapperPage.drawPage(embeddedPage, {
         x: (WRAP_WIDTH - FINAL_WIDTH) / 2,
         y: (WRAP_HEIGHT - FINAL_HEIGHT) / 2,
         width: FINAL_WIDTH,
-        height: FINAL_HEIGHT
+        height: FINAL_HEIGHT,
       });
     }
 
-    // === Final export ===
     const finalPdfBytes = await wrapperPdf.save();
     res.set({
       'Content-Type': 'application/pdf',
@@ -177,8 +231,11 @@ drawLine(width - bleed , bleed - 10, width - bleed , bleed);  // vertical line
     });
     res.send(Buffer.from(finalPdfBytes));
   } catch (err) {
-    console.error('Error generating merged spread:', err);
-    res.status(500).json({ error: "Please verify your PDF page numbers or try again due to a technical issue." });
+    console.error('❌ Error generating merged spread:', err);
+    res.status(500).json({
+      error:
+        'Something went wrong while generating your PDF. Please verify your file has enough pages and try again.',
+    });
   }
 });
 
