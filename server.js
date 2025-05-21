@@ -27,6 +27,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { PDFDocument, rgb } from 'pdf-lib';
 import multer from 'multer';
+import { drawCutMarks } from './utils/drawCutMarks.js';
+import { drawMiddleMarks } from './utils/drawMiddleMarks.js';
+
 
 const upload = multer();
 const app = express();
@@ -77,16 +80,14 @@ app.post('/merge-spread', upload.single('pdfFile'), async (req, res) => {
     const MARGIN_Y = BLEED;
 
     const pagePairs = [
-      [2, 'blank'],
       ['blank', 1],
-      [6, 3],
-      [4, 5],
+      [2, 15],
+      [14, 3],
+      [4, 13],
+      [12, 5],
+      [6, 11],
       [10, 7],
-      [8, 9],
-      [14, 11],
-      [12, 13],
-      ['blank', 15],
-      [16, 0]
+      [8,9]
     ];
 
     const uniquePages = [...new Set(pagePairs.flat().filter(p => p !== 'blank'))];
@@ -96,32 +97,6 @@ app.post('/merge-spread', upload.single('pdfFile'), async (req, res) => {
       pageMap[pageNum] = copiedPages[index];
     });
 
-    const drawCutMarks = (page, width, height, bleed) => {
-      const drawLine = (x1, y1, x2, y2) => {
-        page.drawLine({
-          start: { x: x1, y: y1 },
-          end: { x: x2, y: y2 },
-          thickness: 1,
-          color: rgb(0, 0, 0),
-        });
-      };
-
-      // === Bottom-Left
-      drawLine(bleed - 10, bleed, bleed, bleed);
-      drawLine(bleed, bleed - 10, bleed, bleed);
-
-      // === Bottom-Right
-      drawLine(width - bleed, bleed, width - bleed + 10, bleed);
-      drawLine(width - bleed, bleed - 10, width - bleed, bleed);
-
-      // === Top-Left
-      drawLine(bleed - 10, height - bleed - 9, bleed + 1, height - bleed - 9);
-      drawLine(bleed, height - bleed - 10, bleed, height - bleed);
-
-      // === Top-Right
-      drawLine(width - bleed - 2, height - bleed - 9, width - bleed + 9, height - bleed - 9);
-      drawLine(width - bleed - 1, height - bleed - 9, width - bleed - 1, height - bleed + 1);
-    };
 
     // === Generate spreads with bleed + marks ===
     for (const [leftIdx, rightIdx] of pagePairs) {
@@ -148,6 +123,13 @@ app.post('/merge-spread', upload.single('pdfFile'), async (req, res) => {
       }
 
       drawCutMarks(page, FINAL_WIDTH, FINAL_HEIGHT, BLEED);
+      drawMiddleMarks(page, {
+        imgWidth: IMG_WIDTH,
+        bleed: BLEED,
+        finalHeight: FINAL_HEIGHT,
+        extraGutter: 0,
+      });
+
     }
 
     // === Wrap each spread page inside a larger centered canvas ===
