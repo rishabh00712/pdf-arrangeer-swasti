@@ -21,13 +21,14 @@
  * - Allows optional blank pages in the spread using custom `pagePairs`.
  * - Applies equal margins around the spread (top, bottom, left, right) while removing spacing between left and right pages.
  * - Returns the newly created spread PDF as a downloadable file.
- */
-import express from 'express';
+ */import express from 'express';
 import bodyParser from 'body-parser';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { PDFDocument, rgb } from 'pdf-lib';
+import multer from 'multer';
 
+const upload = multer();
 const app = express();
 
 // ES module __dirname support
@@ -41,19 +42,27 @@ app.set('views', path.join(__dirname, 'views'));
 // Static files
 app.use(express.static(path.join(__dirname, 'public')));
 
-// JSON body limit for base64 PDF
+// Optional: JSON body limit (safe to keep for other routes)
 app.use(bodyParser.json({ limit: '50mb' }));
 
+// Render the upload page
 app.get('/', (req, res) => {
   res.render('index');
-});app.post('/merge-spread', async (req, res) => {
+});
+
+// === Multer version of /merge-spread ===
+app.post('/merge-spread', upload.single('pdfFile'), async (req, res) => {
   try {
-    const base64Data = req.body.pdfBase64;
-    const buffer = Buffer.from(base64Data, 'base64');
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ error: 'No PDF file uploaded.' });
+    }
+
+    const buffer = req.file.buffer;
 
     const originalPdf = await PDFDocument.load(buffer);
     const newPdf = await PDFDocument.create();
 
+    // === Constants ===
     const POINTS_PER_MM = 2.83465;
     const BLEED_MM = 5;
     const BLEED = BLEED_MM * POINTS_PER_MM;
@@ -66,35 +75,24 @@ app.get('/', (req, res) => {
     const FINAL_HEIGHT = IMG_HEIGHT + BLEED * 2;
     const MARGIN_X = BLEED;
     const MARGIN_Y = BLEED;
-    const EXTRA_GUTTER = 0;
 
     const pagePairs = [
+      [2, 'blank'],
       ['blank', 1],
-      [2, 15],
-      [14, 3],
-      [4, 13],
-      [12, 5],
-      [6, 11],
+      [6, 3],
+      [4, 5],
       [10, 7],
-      [8, 9]
+      [8, 9],
+      [14, 11],
+      [12, 13],
+      ['blank', 15],
+      [16, 0]
     ];
 
-    const finalSpreadPages = [16, 0]; // last spread
-    const uniquePages = [...new Set([...pagePairs.flat(), ...finalSpreadPages].filter(p => p !== 'blank'))];
-
-    const pageCount = originalPdf.getPageCount();
-    console.log('Uploaded PDF page count:', pageCount);
-
-    // Ensure no invalid page numbers are requested
-    const validPages = uniquePages.filter(p => Number.isInteger(p) && p >= 0 && p < pageCount);
-    if (validPages.length !== uniquePages.length) {
-      console.error("❌ Some pages in pagePairs do not exist in uploaded PDF.");
-      return res.status(400).json({ error: 'One or more pages do not exist in the uploaded PDF. Please upload a full file.' });
-    }
-
-    const copiedPages = await newPdf.copyPages(originalPdf, validPages);
+    const uniquePages = [...new Set(pagePairs.flat().filter(p => p !== 'blank'))];
+    const copiedPages = await newPdf.copyPages(originalPdf, uniquePages);
     const pageMap = {};
-    validPages.forEach((pageNum, index) => {
+    uniquePages.forEach((pageNum, index) => {
       pageMap[pageNum] = copiedPages[index];
     });
 
@@ -108,59 +106,24 @@ app.get('/', (req, res) => {
         });
       };
 
-      // Bottom-Left
+      // === Bottom-Left
       drawLine(bleed - 10, bleed, bleed, bleed);
       drawLine(bleed, bleed - 10, bleed, bleed);
 
-      const rightX = width - bleed;
+      // === Bottom-Right
+      drawLine(width - bleed, bleed, width - bleed + 10, bleed);
+      drawLine(width - bleed, bleed - 10, width - bleed, bleed);
 
-      // Bottom-Right
-      drawLine(rightX, bleed, rightX + 10, bleed);
-      drawLine(rightX, bleed - 10, rightX, bleed);
-
-      // Top-Left
+      // === Top-Left
       drawLine(bleed - 10, height - bleed - 9, bleed + 1, height - bleed - 9);
       drawLine(bleed, height - bleed - 10, bleed, height - bleed);
 
-      // Top-Right
-      drawLine(rightX, height - bleed - 9, rightX + 10, height - bleed - 9);
-      drawLine(rightX, height - bleed - 9, rightX, height - bleed + 1);
-
-      // Center Spine
-      drawLine(IMG_WIDTH + BLEED, height - bleed - 9, IMG_WIDTH + BLEED, height - bleed + 1);
-      drawLine(IMG_WIDTH + BLEED, bleed - 10, IMG_WIDTH + BLEED, bleed);
+      // === Top-Right
+      drawLine(width - bleed - 2, height - bleed - 9, width - bleed + 9, height - bleed - 9);
+      drawLine(width - bleed - 1, height - bleed - 9, width - bleed - 1, height - bleed + 1);
     };
 
-    const drawCutMarksLastPage = (page, width, height, bleed) => {
-      const drawLine = (x1, y1, x2, y2) => {
-        page.drawLine({
-          start: { x: x1, y: y1 },
-          end: { x: x2, y: y2 },
-          thickness: 1,
-          color: rgb(0, 0, 0),
-        });
-      };
-
-      const rightX = width - 10;
-      const rightLength = 20;
-
-      // Bottom-Left
-      drawLine(bleed - 10, bleed, bleed, bleed);
-      drawLine(bleed, bleed - 10, bleed, bleed);
-
-      // Bottom-Right
-      drawLine(rightX + 10, bleed, rightX + 12, bleed);
-      drawLine(rightX + 10, bleed - rightLength, rightX + 10, bleed);
-
-      // Top-Left
-      drawLine(bleed - 10, height - bleed - 9, bleed + 1, height - bleed - 9);
-      drawLine(bleed, height - bleed - 10, bleed, height - bleed);
-
-      // Top-Right
-      drawLine(rightX + 10, height - bleed - 9, rightX + 10 + rightLength, height - bleed - 9);
-      drawLine(rightX, height - bleed - 9, rightX, height - bleed + 1);
-    };
-
+    // === Generate spreads with bleed + marks ===
     for (const [leftIdx, rightIdx] of pagePairs) {
       const page = newPdf.addPage([FINAL_WIDTH, FINAL_HEIGHT]);
 
@@ -187,25 +150,7 @@ app.get('/', (req, res) => {
       drawCutMarks(page, FINAL_WIDTH, FINAL_HEIGHT, BLEED);
     }
 
-    // Final spread [16, 0]
-    if (!pageMap[16] || !pageMap[0]) {
-      throw new Error('❌ Final pages 16 or 0 are missing. Cannot complete spread.');
-    }
-
-    const lastPage = newPdf.addPage([FINAL_WIDTH, FINAL_HEIGHT]);
-    const [page16] = await newPdf.embedPages([pageMap[16]]);
-    lastPage.drawPage(page16, { x: 5, y: 5, width: IMG_WIDTH, height: IMG_HEIGHT });
-
-    const [page0] = await newPdf.embedPages([pageMap[0]]);
-    lastPage.drawPage(page0, {
-      x: MARGIN_X + IMG_WIDTH + EXTRA_GUTTER,
-      y: 5,
-      width: IMG_WIDTH,
-      height: IMG_HEIGHT,
-    });
-
-    drawCutMarksLastPage(lastPage, FINAL_WIDTH, FINAL_HEIGHT, BLEED);
-
+    // === Wrap each spread page inside a larger centered canvas ===
     const wrapperPdf = await PDFDocument.create();
     const finalPages = await wrapperPdf.copyPages(newPdf, newPdf.getPageIndices());
 
@@ -216,6 +161,7 @@ app.get('/', (req, res) => {
     for (const page of finalPages) {
       const wrapperPage = wrapperPdf.addPage([WRAP_WIDTH, WRAP_HEIGHT]);
       const [embeddedPage] = await wrapperPdf.embedPages([page]);
+
       wrapperPage.drawPage(embeddedPage, {
         x: (WRAP_WIDTH - FINAL_WIDTH) / 2,
         y: (WRAP_HEIGHT - FINAL_HEIGHT) / 2,
@@ -224,6 +170,7 @@ app.get('/', (req, res) => {
       });
     }
 
+    // === Final export ===
     const finalPdfBytes = await wrapperPdf.save();
     res.set({
       'Content-Type': 'application/pdf',
@@ -231,14 +178,13 @@ app.get('/', (req, res) => {
     });
     res.send(Buffer.from(finalPdfBytes));
   } catch (err) {
-    console.error('❌ Error generating merged spread:', err);
-    res.status(500).json({
-      error:
-        'Something went wrong while generating your PDF. Please verify your file has enough pages and try again.',
-    });
+    console.error('Error generating merged spread:', err);
+    res.status(500).json({ error: "Please verify your PDF page numbers or try again due to a technical issue." });
   }
 });
 
-app.listen(3000, '0.0.0.0', () => {
-  console.log(`✅ Server running`);
+// ✅ Use dynamic port for Render + proper binding
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Server running at http://localhost:${PORT}`);
 });

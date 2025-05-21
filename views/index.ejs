@@ -41,41 +41,36 @@
     });
 
     async function uploadPDF() {
-      const file = fileInput.files[0];
-      if (!file) return showAlert('Please select a PDF');
+  const file = fileInput.files[0];
+  if (!file) return showAlert('Please select a PDF');
 
-      const reader = new FileReader();
-      reader.onload = async function (e) {
-        const base64 = e.target.result.split(',')[1];
+  const formData = new FormData();
+  formData.append('pdfFile', file);
 
-        try {
-          const response = await fetch('/merge-spread', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pdfBase64: base64 }),
-          });
+  try {
+    const response = await fetch('/merge-spread', {
+      method: 'POST',
+      body: formData,
+    });
 
-          if (!response.ok) {
-            const errorData = await response.json();
-            showAlert(errorData.error || "Something went wrong.");
-            return;
-          }
-
-          const blob = await response.blob();
-          const link = document.createElement('a');
-          link.href = URL.createObjectURL(blob);
-          link.download = 'merged_spread.pdf';
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-        } catch (err) {
-          console.error(err);
-          showAlert("Unexpected error occurred.");
-        }
-      };
-
-      reader.readAsDataURL(file);
+    if (!response.ok) {
+      const errorData = await response.json();
+      showAlert(errorData.error || "Something went wrong.");
+      return;
     }
+
+    const blob = await response.blob();
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'merged_spread.pdf';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  } catch (err) {
+    console.error(err);
+    showAlert("Unexpected error occurred.");
+  }
+}
 
     function showAlert(message) {
       const alertBox = document.getElementById('alertBox');
