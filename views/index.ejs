@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Merge PDF Spread</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <link rel="stylesheet" href="/styles/style.css">
+</head>
+
+<body>
+  <!-- Alert Box -->
+  <div id="alertBox" class="alert" style="display: none;">Something went wrong!</div>
+
+  <!-- Title -->
+  <h2>Don’t Choose A PDF With Less Than 17 Pages</h2>
+
+  <!-- Upload Button -->
+  <label for="pdfInput" class="upload-label">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+      <path d="M5 20h14v-2H5v2zm7-18L5.33 9h3.67v4h4V9h3.67L12 2z"/>
+    </svg>
+    Choose File
+  </label>
+
+  <!-- Hidden Input -->
+  <input type="file" id="pdfInput" accept="application/pdf" />
+
+  <!-- File Name Display -->
+  <div id="fileName"></div>
+
+  <!-- Upload Trigger -->
+  <button onclick="uploadPDF()">Upload & Merge</button>
+
+  <script>
+    const fileInput = document.getElementById('pdfInput');
+    const fileNameDisplay = document.getElementById('fileName');
+
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files[0];
+      fileNameDisplay.textContent = file ? file.name : '';
+    });
+
+    async function uploadPDF() {
+      const file = fileInput.files[0];
+      if (!file) return showAlert('Please select a PDF');
+
+      const reader = new FileReader();
+      reader.onload = async function (e) {
+        const base64 = e.target.result.split(',')[1];
+
+        try {
+          const response = await fetch('/merge-spread', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pdfBase64: base64 }),
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            showAlert(errorData.error || "Something went wrong.");
+            return;
+          }
+
+          const blob = await response.blob();
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = 'merged_spread.pdf';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        } catch (err) {
+          console.error(err);
+          showAlert("Unexpected error occurred.");
+        }
+      };
+
+      reader.readAsDataURL(file);
+    }
+
+    function showAlert(message) {
+      const alertBox = document.getElementById('alertBox');
+      alertBox.textContent = message;
+      alertBox.classList.remove('hide');
+      alertBox.style.display = 'block';
+
+      setTimeout(() => {
+        alertBox.classList.add('hide');
+        setTimeout(() => {
+          alertBox.style.display = 'none';
+        }, 500);
+      }, 3000);
+    }
+  </script>
+</body>
+</html>
